@@ -1,0 +1,10 @@
+dotenv
+gradio
+openai
+pillow
+diffusers
+torchvision
+torch
+accelerate
+pydantic
+transformers
