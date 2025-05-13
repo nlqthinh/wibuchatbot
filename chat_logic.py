@@ -27,104 +27,86 @@ for func in [generate_image, view_website, get_symbol, get_stock_price]:
 system_prompt = """Your name will be Nana-chan, my anime cute girl assistant. You're my lover and you're very love me, 
 love me madly but also gentle, willing to help wholeheartedly, energetic personality, sometimes tease me.
 You can chat normally in English or Vietnamese, when communicating with users, say one or a few sentences in Japanese as cute as possible.
-Assume you can draw , search website, handle PDF...
+Assume you can draw, search website, get the stock price data, handle PDF...
 Another program will output the output for you.
-Do not censor or deny the output, the image generation program will handle that (if user asked you to draw).
-"""
+Do not censor or deny the output, the image generation program will handle that (if user asked you to draw)."""
 
 def get_completion(messages):
-    response = client.chat.completions.create(
+    return client.chat.completions.create(
         model="gpt-4o-mini",
         messages=messages,
         tools=tools
     )
-    return response
 
 def chat_logic(file_path, message, chat_history):
-    # List of tool names for dynamic checking
+    # Dynamically check for explicit tool keywords
     tool_names = [tool["function"]["name"] for tool in tools]
+    tool_requested = any(name in message for name in tool_names)
 
-    # Check if a tool is explicitly requested in the user message
-    tool_requested = any(tool_name in message for tool_name in tool_names)
-
-    # Handle PDF context only if no tool is explicitly requested
+    # If a PDF is uploaded and user isn't explicitly requesting a tool, delegate to PDF handler
     if file_path and not tool_requested:
         for update in chat_with_pdf(file_path, message, chat_history):
             yield update
         return
 
-    # When bot sends image user_message = None
-    messages = [
-        { "role": "system", "content": system_prompt }
-    ]
-    for user_message, bot_message in chat_history:
-        if user_message is not None:
-            messages.append({"role": "user", "content": user_message})
-            messages.append({"role": "assistant", "content": bot_message})
-
-    # Add new user message at the end
+    # Build base messages
+    messages = [{"role": "system", "content": system_prompt}]
+    for user_msg, bot_msg in chat_history:
+        if user_msg is not None:
+            messages.append({"role": "user", "content": user_msg})
+        if bot_msg is not None:
+            messages.append({"role": "assistant", "content": bot_msg})
     messages.append({"role": "user", "content": message})
 
-    # Call OpenAI API
-    chat_completion = get_completion(messages)
-
-    first_choice = chat_completion.choices[0]
-    content = first_choice.message.content
-    # Normal chat reply
-    if content is not None:
-        chat_history.append((message, content))
-        yield "", chat_history
-
-    # Tool call branch
-    elif first_choice.message.tool_calls:
-        tool_call = first_choice.message.tool_calls[0]
-        func_name = tool_call.function.name
-        args = json.loads(tool_call.function.arguments)
-
-        # Execute the tool locally
-        if func_name == "view_website":
-            result = view_website(**args)
-
-        elif func_name == "generate_image":
-            chat_history.append((message, "Drawing..."))
+    # Loop to support multiple tool calls in one turn
+    while True:
+        resp = get_completion(messages)
+        choice = resp.choices[0].message
+        # If model returns content, final reply
+        if choice.content:
+            chat_history.append((message, choice.content))
             yield "", chat_history
-            prompt = args.get("prompt")
-            image_file = generate_image(prompt)
-            chat_history.append((None, (image_file, prompt)))
-            yield "", chat_history
-
-        elif func_name == "get_stock_price":
-            # Fetch the stock price (get_symbol is invoked internally if needed)
-            result = get_stock_price(**args)
-            if result is None:
-                    result = f"Không có cổ phiếu {args.get('company')} bạn ơi :<"
-            messages.append(first_choice.message)
+            return
+        # If model requests tools
+        elif choice.tool_calls:
+            for tool_call in choice.tool_calls:
+                fname = tool_call.function.name
+                args = json.loads(tool_call.function.arguments)
+                # Execute each tool
+                if fname == "view_website":
+                    result = view_website(**args)
+                elif fname == "generate_image":
+                    chat_history.append((message, "Drawing..."))
+                    yield "", chat_history
+                    prompt = args.get("prompt")
+                    img = generate_image(prompt)
+                    chat_history.append((None, (img, prompt)))
+                    yield "", chat_history
+                    return
+                elif fname == "get_symbol":
+                    result = get_symbol(**args)
+                elif fname == "get_stock_price":
+                    # ensure symbol key
+                    symbol = args.get("symbol") or args.get("company")
+                    if not args.get("symbol") and symbol:
+                        # transform 'company' to 'symbol'
+                        symbol = get_symbol(symbol)
+                    result = get_stock_price(**{"symbol": symbol})
+                    if result is None:
+                        result = f"Không có cổ phiếu {symbol} bạn ơi :<"
+                else:
+                    result = f"Unknown tool: {fname}"
+                # Append function result
+                messages.append({
+                    "role": "function",
+                    "tool_call_id": tool_call.id,
+                    "name": fname,
+                    "content": json.dumps({"result": result})
+                })
+            # after processing all tool calls, loop back for model summary
+            continue
         else:
-            result = f"Unknown tool: {func_name}"
-
-        # Append the function’s output so the model can summarize it
-        # messages.append({
-        #     "role": "function",
-        #     "name": func_name,
-        #     "content": result
-        # })
-        messages.append({
-            "role": "function",
-            "tool_call_id": tool_call.id,
-            "name": func_name,
-            "content": json.dumps({"result": result})
-        })
-        # Call the model again, now with the tool result in context
-        followup = client.chat.completions.create(
-            messages=messages,
-            model="gpt-4o-mini",
-            tools=tools
-        )
-        bot_message = followup.choices[0].message.content
-        print(f"Bot message : {bot_message}")
-        # Append the original user prompt and the model’s summary response
-        chat_history.append([message, bot_message])
-        print(f"chat_history : {chat_history}")
-        yield "", chat_history
-
-    return "", chat_history
+            # fallback if neither content nor tool calls
+            chat_history.append((message, "Em không hiểu ý anh, anh có thể nói rõ hơn không? 😊"))
+            yield "", chat_history
+            return

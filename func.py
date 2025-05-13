@@ -6,6 +6,7 @@ from config import JINA_API_KEY
 import urllib3
 import yfinance as yf
 import time
+from pprint import pprint
 
 # Setup pipeline
 scheduler = EulerDiscreteScheduler.from_pretrained("John6666/baxl-v3-sdxl", subfolder="scheduler")
@@ -60,23 +61,34 @@ def get_symbol(company: str) -> str:
     """
     url = "https://query2.finance.yahoo.com/v1/finance/search"
     params = {"q": company, "country": "United States"}
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-    res = requests.get(url, params=params, headers=headers)
+    user_agents = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/42.0.2311.135 Safari/537.36 Edge/12.246"}
+    res = requests.get(url, params=params, headers=user_agents)
+
     data = res.json()
+
     quotes = data.get("quotes", [])
     if not quotes:
         return None
-    return quotes[0]["symbol"]
+    
+    symbol = data['quotes'][0]['symbol']
+    return symbol
 
-def get_stock_price(symbol: str, max_retries=3, retry_delay=5):
+
+def get_stock_price(symbol:str, max_retries=3, retry_delay=5):
     """
     Retrieve the most recent stock price data for a specified company.
     Includes retry mechanism to handle rate limiting.
+
+    :param symbol: The stock symbol.
+    :param max_retries: Maximum number of retries.
+    :param retry_delay: Delay between retries in seconds.
+    :output: A dictionary containing the most recent stock price data.
     """
     for attempt in range(max_retries):
         try:
             stock = yf.Ticker(symbol)
-            time.sleep(retry_delay)
+            # Add a delay to avoid rate limiting
+            time.sleep(retry_delay)  # Wait before making the request
             hist = stock.history(period="1d", interval="1m")
             latest = hist.iloc[-1]
             return {
@@ -85,8 +97,13 @@ def get_stock_price(symbol: str, max_retries=3, retry_delay=5):
                 "high": latest["High"],
                 "low": latest["Low"],
                 "close": latest["Close"],
-                "volume": latest["Volume"],
+                "volume": latest["Volume"]
             }
-        except yf.exceptions.YFRateLimitError:
+        # except yf.utils.YFRateLimitError: # Remove or comment out this line, since yf.utils.YFRateLimitError might not be available
+        except yf.exceptions.YFRateLimitError: # Use yf.exceptions.YFRateLimitError as it is available in current yfinance version
+            print(f"Rate limited. Retrying in {retry_delay} seconds (attempt {attempt + 1}/{max_retries})...")
             time.sleep(retry_delay)
-    raise yf.exceptions.YFRateLimitError("Rate limit exceeded after retries")
+
+    # raise yf.utils.YFRateLimitError("Too many requests. Rate limit exceeded after multiple retries.") # Update the exception type or comment out
+    raise yf.exceptions.YFRateLimitError("Too many requests. Rate limit exceeded after multiple retries.") # Update the exception type here as well
+     
