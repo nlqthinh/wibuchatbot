@@ -48,7 +48,7 @@ Replace `<your_openai_api_key>` and `<your_jina_api_key>` with your actual API k
 
 ### 4. Modify Nana-chan’s Personality (Optional)
 
-To change the personality of Nana-chan, edit the `system_prompt` variable in `chat_logic.py`. For example:
+Currently her treat you like her lover. To change the personality of Nana-chan, edit the `system_prompt` variable in `chat_logic.py`. For example:
 
 ```python
 system_prompt = "Your name will be Nana-chan, my anime cute girl assistant..."
