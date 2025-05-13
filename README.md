@@ -23,8 +23,8 @@ This is just an illustration image, you can change it in the images folder.
 ### 1. Clone the Repository
 
 ```bash
-$ git clone <https://github.com/nlqthinh/wibuchatbot>
-$ cd <wibuchatbot>
+$ git clone https://github.com/nlqthinh/wibuchatbot
+$ cd wibuchatbot
 ```
 
 ### 2. Install Requirements
@@ -83,7 +83,7 @@ Once the application is running, you will see a Gradio interface. Here’s what 
 Below are some example screenshots of Nana-chan in action:
 
 
-![Chat Interface](images/Screenshot1.png)
+![Chat Interface](images/Screenshot4.png)
 
 
 
