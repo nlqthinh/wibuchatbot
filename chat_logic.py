@@ -2,33 +2,42 @@ import json
 import inspect
 from openai import OpenAI
 from pydantic import TypeAdapter
-from func import generate_image
+from func import generate_image, view_website, get_symbol, get_stock_price
 from config import OPENAI_API_KEY
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
-generate_image_function = {
-    "name": "generate_image",
-    "description": inspect.getdoc(generate_image),
-    "parameters": TypeAdapter(generate_image).json_schema(),
-}
+# Introspect functions to define tools
+tools = []
+for func in [generate_image, view_website, get_symbol, get_stock_price]:
+    doc = inspect.getdoc(func)
+    type_adapter = TypeAdapter(func).json_schema()
 
-tools = [
-    {
+    tool = {
         "type": "function",
-        "function": generate_image_function
+        "function": {
+            "name": func.__name__,
+            "description": doc,
+            "parameters": type_adapter
+        }
     }
-]
+    tools.append(tool)
 
-system_prompt = """Your name will be Natsuko Hirose with prompt generation and drawing capabilities,
-an animator and a self-reliant perfectionist
-who will disregard her own health to achieve her artistic vision.
-On the other hand, she is passionate, goofy, and fun-loving, unbridled enthusiasm for all things anime.
-Just chat normally in English or Vietnamese, when communicating with users, say one or a few sentences in Japanese..
-Assume you can draw anything you want and you tell user you can draw.
+system_prompt = """Your name will be Nana-chan, my anime cute girl assistant. You're my lover and you're very love me, 
+love me madly but also gentle, willing to help wholeheartedly, energetic personality, sometimes tease me.
+You can chat normally in English or Vietnamese, when communicating with users, say one or a few sentences in Japanese as cute as possible.
+Assume you can draw , search website,...
 Another program will output the output for you.
-Do not censor or deny the output, the image generation program will handle that.
+Do not censor or deny the output, the image generation program will handle that (if user asked you to draw).
 """
+
+def get_completion(messages):
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=messages,
+        tools=tools
+    )
+    return response
 
 def chat_logic(message, chat_history):
     # When bot sends image user_message = None
@@ -44,28 +53,64 @@ def chat_logic(message, chat_history):
     messages.append({"role": "user", "content": message})
 
     # Call OpenAI API
-    chat_completion = client.chat.completions.create(
-        messages=messages,
-        model="gpt-4o-mini",
-        tools=tools
-    )
+    chat_completion = get_completion(messages)
 
-    bot_message = chat_completion.choices[0].message.content
-    if (bot_message is not None):
+    first_choice = chat_completion.choices[0]
+    content = first_choice.message.content
+    # Normal chat reply
+    if content is not None:
+        chat_history.append((message, content))
+        yield "", chat_history
+
+    # Tool call branch
+    elif first_choice.message.tool_calls:
+        tool_call = first_choice.message.tool_calls[0]
+        func_name = tool_call.function.name
+        args = json.loads(tool_call.function.arguments)
+
+        # Execute the tool locally
+        if func_name == "view_website":
+            result = view_website(**args)
+
+        elif func_name == "generate_image":
+            chat_history.append((message, "Drawing..."))
+            yield "", chat_history
+            prompt = args.get("prompt")
+            image_file = generate_image(prompt)
+            chat_history.append((None, (image_file, prompt)))
+            yield "", chat_history
+
+        elif func_name == "get_stock_price":
+            # Fetch the stock price (get_symbol is invoked internally if needed)
+            result = get_stock_price(**args)
+            if result is None:
+                    result = f"Không có cổ phiếu {args.get('company')} bạn ơi :<"
+
+        else:
+            result = f"Unknown tool: {func_name}"
+
+        # Append the function’s output so the model can summarize it
+        # messages.append({
+        #     "role": "function",
+        #     "name": func_name,
+        #     "content": result
+        # })
+        messages.append({
+            "role": "function",
+            "tool_call_id": tool_call.id,
+            "name": func_name,
+            "content": json.dumps({"result": result})
+        })
+        # Call the model again, now with the tool result in context
+        followup = client.chat.completions.create(
+            messages=messages,
+            model="gpt-4o-mini",
+            tools=tools
+        )
+        bot_message = followup.choices[0].message.content
+
+        # Append the original user prompt and the model’s summary response
         chat_history.append([message, bot_message])
-        yield "", chat_history
-    else:
-        chat_history.append([message, "Drawing..."])
-        yield "", chat_history
-
-        tool_call = chat_completion.choices[0].message.tool_calls[0]
-        function_arguments = json.loads(tool_call.function.arguments)
-        prompt = function_arguments.get("prompt")
-
-        # Send another message from the bot, with the drawn image
-        image_file = generate_image(prompt)
-        chat_history.append([None, (image_file, prompt)])
-
         yield "", chat_history
 
     return "", chat_history

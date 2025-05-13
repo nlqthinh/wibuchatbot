@@ -8,3 +8,5 @@ torch
 accelerate
 pydantic
 transformers
+requests
+yfinance
