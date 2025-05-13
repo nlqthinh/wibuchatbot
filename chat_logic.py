@@ -4,6 +4,7 @@ from openai import OpenAI
 from pydantic import TypeAdapter
 from func import generate_image, view_website, get_symbol, get_stock_price
 from config import OPENAI_API_KEY
+from pdf_handler import process_file, chat_with_pdf
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
@@ -26,7 +27,7 @@ for func in [generate_image, view_website, get_symbol, get_stock_price]:
 system_prompt = """Your name will be Nana-chan, my anime cute girl assistant. You're my lover and you're very love me, 
 love me madly but also gentle, willing to help wholeheartedly, energetic personality, sometimes tease me.
 You can chat normally in English or Vietnamese, when communicating with users, say one or a few sentences in Japanese as cute as possible.
-Assume you can draw , search website,...
+Assume you can draw , search website, handle PDF...
 Another program will output the output for you.
 Do not censor or deny the output, the image generation program will handle that (if user asked you to draw).
 """
@@ -39,7 +40,19 @@ def get_completion(messages):
     )
     return response
 
-def chat_logic(message, chat_history):
+def chat_logic(file_path, message, chat_history):
+    # List of tool names for dynamic checking
+    tool_names = [tool["function"]["name"] for tool in tools]
+
+    # Check if a tool is explicitly requested in the user message
+    tool_requested = any(tool_name in message for tool_name in tool_names)
+
+    # Handle PDF context only if no tool is explicitly requested
+    if file_path and not tool_requested:
+        for update in chat_with_pdf(file_path, message, chat_history):
+            yield update
+        return
+
     # When bot sends image user_message = None
     messages = [
         { "role": "system", "content": system_prompt }
@@ -85,7 +98,7 @@ def chat_logic(message, chat_history):
             result = get_stock_price(**args)
             if result is None:
                     result = f"Không có cổ phiếu {args.get('company')} bạn ơi :<"
-
+            messages.append(first_choice.message)
         else:
             result = f"Unknown tool: {func_name}"
 
@@ -108,9 +121,10 @@ def chat_logic(message, chat_history):
             tools=tools
         )
         bot_message = followup.choices[0].message.content
-
+        print(f"Bot message : {bot_message}")
         # Append the original user prompt and the model’s summary response
         chat_history.append([message, bot_message])
+        print(f"chat_history : {chat_history}")
         yield "", chat_history
 
     return "", chat_history

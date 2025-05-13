@@ -10,3 +10,9 @@ pydantic
 transformers
 requests
 yfinance
+langchain
+langchain-community 
+pymupdf 
+langchain-chroma
+langchain-huggingface
+sentence-transformers
